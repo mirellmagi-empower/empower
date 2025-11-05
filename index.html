@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reaction Speed Challenge</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app">
+        <aside class="sidebar" aria-label="Latest reaction times">
+            <div class="brand">⚡ Reaction Feed</div>
+            <div class="name-entry">
+                <label for="playerName">Your name</label>
+                <input id="playerName" type="text" maxlength="20" placeholder="Enter name" aria-label="Your name">
+            </div>
+            <div class="stats">
+                <div class="stat"><span>Personal Best</span><strong id="statBest">—</strong></div>
+                <div class="stat"><span>Average (last 10)</span><strong id="statAvg">—</strong></div>
+                <div class="stat"><span>Attempts</span><strong id="statAttempts">0</strong></div>
+            </div>
+            <div class="controls">
+                <button id="clearBtn" class="secondary" title="Clear this device's saved results">Clear results</button>
+            </div>
+            <h2>Latest times (this device)</h2>
+            <ul id="latestList" class="latest-list" aria-live="polite"></ul>
+
+            <h2 style="margin-top:12px;">Today's Best</h2>
+            <div id="todayStatus" class="helper" style="margin-bottom:6px;"></div>
+            <div id="todayBest" class="winner-card"></div>
+        </aside>
+
+        <main class="stage">
+            <header class="hero">
+                <h1>Welcome to the Reaction Speed Challenge!</h1>
+                <p class="subtitle">Test your reaction time and compete with your friends!</p>
+                <p class="helper">Click as soon as the screen changes color to see how fast you really are.</p>
+                <p class="helper">Get ready... and stay sharp!</p>
+            </header>
+
+            <section class="game" aria-live="polite">
+                <div id="prompt" class="prompt">Press Start, then wait for green...</div>
+                <button id="bigButton" class="big-button" aria-label="Reaction button">
+                    <span id="buttonLabel">Start</span>
+                </button>
+            </section>
+        </main>
+    </div>
+
+    <footer class="footer">
+        <span>Tip: False starts don't count. Patience wins!</span>
+    </footer>
+
+    <!-- Supabase client (CDN) -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <!-- Config file with your Supabase URL and anon key (edit config.js) -->
+    <script src="config.js"></script>
+    <script src="script.js"></script>
+</body>
+<!-- Made with ⚡ and focus -->
+</html>
+
+
