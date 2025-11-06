@@ -24,8 +24,15 @@ const NAME_KEY = 'playerName';
 
 /** @type {ReturnType<typeof setTimeout> | null} */
 let waitTimer = null;
+let cooldownTimer = null;
 let startedAt = 0;
-let state = 'idle'; // 'idle' | 'waiting' | 'go'
+let lastCompletionTime = 0;
+let state = 'idle'; // 'idle' | 'waiting' | 'go' | 'cooldown'
+const COOLDOWN_MS = 3000; // 3 seconds cooldown after each attempt
+let clickCount = 0; // Track clicks during waiting phase
+let lastClickTime = 0; // Track time of last click
+const RAPID_CLICK_THRESHOLD = 500; // If clicks are faster than 500ms apart, it's rapid clicking
+const MAX_CLICKS_DURING_WAIT = 1; // Only allow 1 click during waiting (the "too soon" click)
 
 // Supabase client (optional if keys provided in config.js)
 /** @type {import('@supabase/supabase-js').SupabaseClient | null} */
@@ -205,17 +212,44 @@ function renderTodayBest(row) {
 function resetToIdle(message = 'Press Start, then wait for green...') {
   state = 'idle';
   startedAt = 0;
+  clickCount = 0; // Reset click counter
+  lastClickTime = 0;
   if (waitTimer) { clearTimeout(waitTimer); waitTimer = null; }
-  bigButton.classList.remove('ready', 'go', 'too-soon');
+  if (cooldownTimer) { clearTimeout(cooldownTimer); cooldownTimer = null; }
+  bigButton.classList.remove('ready', 'go', 'too-soon', 'cooldown');
   bigButton.disabled = false;
   buttonLabel.textContent = 'Start';
   promptEl.textContent = message;
+}
+
+function startCooldown() {
+  state = 'cooldown';
+  bigButton.disabled = true;
+  bigButton.classList.add('cooldown');
+  const remaining = COOLDOWN_MS;
+  let timeLeft = Math.ceil(remaining / 1000);
+  
+  const updateCooldown = () => {
+    if (timeLeft > 0) {
+      buttonLabel.textContent = `Wait ${timeLeft}s`;
+      promptEl.textContent = `Cooldown: ${timeLeft} second${timeLeft !== 1 ? 's' : ''} before next attempt`;
+      timeLeft--;
+      cooldownTimer = setTimeout(updateCooldown, 1000);
+    } else {
+      // Cooldown finished
+      resetToIdle('Ready for another attempt!');
+    }
+  };
+  
+  updateCooldown();
 }
 
 function startRound() {
   // Start a new attempt: reset and schedule the GO moment
   if (waitTimer) { clearTimeout(waitTimer); waitTimer = null; }
   state = 'idle';
+  clickCount = 0; // Reset click counter for new round
+  lastClickTime = 0;
   buttonLabel.textContent = 'Wait...';
   bigButton.disabled = true;
   scheduleGo();
@@ -223,13 +257,17 @@ function startRound() {
 
 function scheduleGo() {
   state = 'waiting';
+  startedAt = 0; // Reset timing - ensure it's only set when green
   promptEl.textContent = 'Wait for green...';
   bigButton.classList.add('ready');
   bigButton.classList.remove('go', 'too-soon');
   const delay = 1200 + Math.random() * 2800; // 1.2s - 4s
   waitTimer = setTimeout(() => {
-    state = 'go';
+    // Set timing EXACTLY when button turns green
     startedAt = getNowMs();
+    state = 'go';
+    clickCount = 0; // Reset click counter when button turns green
+    lastClickTime = 0; // Reset to allow fresh click on green
     bigButton.classList.add('go');
     bigButton.classList.remove('ready', 'too-soon');
     bigButton.disabled = false; // re-enable so the click is captured
@@ -239,6 +277,19 @@ function scheduleGo() {
 }
 
 function handleBigButtonClick() {
+  // Prevent starting during cooldown
+  if (state === 'cooldown') {
+    return; // Button is disabled anyway, but extra safety
+  }
+  
+  // Check if trying to start too soon after last completion
+  const timeSinceLastCompletion = Date.now() - lastCompletionTime;
+  if (timeSinceLastCompletion < COOLDOWN_MS && lastCompletionTime > 0) {
+    const remaining = Math.ceil((COOLDOWN_MS - timeSinceLastCompletion) / 1000);
+    promptEl.textContent = `Please wait ${remaining} second${remaining !== 1 ? 's' : ''} before starting again.`;
+    return;
+  }
+
   if (state === 'idle') {
     // Start round
     startRound();
@@ -246,10 +297,32 @@ function handleBigButtonClick() {
   }
 
   if (state === 'waiting') {
-    // Too soon
+    // Too soon - clicked before button turned green
+    const now = Date.now();
+    clickCount++;
+    
+    // Check for rapid clicking
+    if (clickCount > MAX_CLICKS_DURING_WAIT || (lastClickTime > 0 && now - lastClickTime < RAPID_CLICK_THRESHOLD)) {
+      // Rapid clicking detected - invalidate attempt
+      if (waitTimer) { clearTimeout(waitTimer); waitTimer = null; }
+      startedAt = 0;
+      bigButton.classList.add('too-soon');
+      bigButton.classList.remove('ready', 'go');
+      bigButton.disabled = true;
+      buttonLabel.textContent = 'Rapid clicking!';
+      promptEl.textContent = 'Rapid clicking detected. Please wait for green.';
+      setTimeout(() => resetToIdle('Press Start to try again (no rapid clicking)'), 2000);
+      return;
+    }
+    
+    lastClickTime = now;
+    
+    // Regular "too soon" click (first click during waiting)
     if (waitTimer) { clearTimeout(waitTimer); waitTimer = null; }
+    startedAt = 0; // Ensure no timing was recorded
     bigButton.classList.add('too-soon');
     bigButton.classList.remove('ready', 'go');
+    bigButton.disabled = true;
     buttonLabel.textContent = 'Too soon!';
     promptEl.textContent = 'False start. Try again.';
     setTimeout(() => resetToIdle('Press Start to try again'), 800);
@@ -257,8 +330,30 @@ function handleBigButtonClick() {
   }
 
   if (state === 'go') {
+    // Only measure if timing was properly started (button is green)
+    if (startedAt <= 0) {
+      // Safety check: if somehow clicked before timing started, reset
+      resetToIdle('Error: Please try again.');
+      return;
+    }
+    
+    // Check for rapid clicking on green (double-click protection)
+    const now = Date.now();
+    if (lastClickTime > 0 && now - lastClickTime < RAPID_CLICK_THRESHOLD) {
+      // Rapid clicking detected - ignore this click
+      return;
+    }
+    lastClickTime = now;
+    
+    // Disable button immediately to prevent double-clicks
+    bigButton.disabled = true;
     const reactedAt = getNowMs();
     const delta = reactedAt - startedAt;
+    // Ensure delta is positive and reasonable (not negative or too large)
+    if (delta <= 0 || delta > 10000) {
+      resetToIdle('Invalid time. Please try again.');
+      return;
+    }
     const name = (nameInput.value || '').trim().slice(0, 20);
     const entry = { name, ms: delta, ts: Date.now() };
     saveResult(entry);
@@ -268,8 +363,12 @@ function handleBigButtonClick() {
     fetchTodayBest();
     bigButton.classList.remove('go');
     buttonLabel.textContent = msToText(delta);
-    promptEl.textContent = `Nice! ${msToText(delta)}. Press Start to beat it.`;
-    setTimeout(() => resetToIdle('Ready for another?'), 1200);
+    promptEl.textContent = `Nice! ${msToText(delta)}.`;
+    lastCompletionTime = Date.now(); // Record when this attempt completed
+    // Show result briefly, then start cooldown
+    setTimeout(() => {
+      startCooldown();
+    }, 1500);
     return;
   }
 }
@@ -277,6 +376,10 @@ function handleBigButtonClick() {
 // Keyboard support: Space/Enter triggers big button
 function handleKeydown(e) {
   if (e.key === ' ' || e.key === 'Enter') {
+    // Don't allow keyboard input during cooldown
+    if (state === 'cooldown' || bigButton.disabled) {
+      return;
+    }
     e.preventDefault();
     bigButton.click();
   }
